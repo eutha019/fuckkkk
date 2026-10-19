@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>大厅 · 打卡与账本</title>
+<link rel="manifest" href="data:application/manifest+json,{%22name%22:%22大厅%22,%22short_name%22:%22大厅%22,%22start_url%22:%22/%22,%22display%22:%22standalone%22,%22background_color%22:%22%23f5f7fa%22,%22theme_color%22:%22%234a7c9b%22,%22icons%22:[{%22src%22:%22https://via.placeholder.com/192/4a7c9b/ffffff?text=H%22,%22sizes%22:%22192x192%22,%22type%22:%22image/png%22}]}">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root{--bg:#f5f7fa;--card:#fff;--primary:#4a7c9b;--accent:#6ba3c7;--danger:#d98b8b;--text:#2c3e50;--muted:#8fa6b8;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);padding:12px;padding-bottom:80px;min-height:100vh;}
+.card{background:var(--card);border-radius:18px;padding:18px;margin-bottom:14px;box-shadow:0 2px 14px rgba(74,124,155,0.08);}
+.btn{background:var(--primary);color:#fff;border:none;padding:10px 18px;border-radius:12px;font-size:0.9rem;cursor:pointer;font-weight:500;}
+.btn:active{opacity:0.85;}
+.btn-sm{padding:6px 12px;font-size:0.8rem;border-radius:10px;}
+.btn-outline{background:transparent;border:1.5px solid var(--primary);color:var(--primary);}
+.btn-danger{background:var(--danger);}
+input,textarea,select{width:100%;padding:12px 14px;border:1.5px solid #dde5ed;border-radius:12px;font-size:0.9rem;outline:none;background:#fafcfe;color:var(--text);}
+input:focus{border-color:var(--accent);}
+h2{font-size:1.15rem;margin-bottom:12px;color:var(--primary);}
+h3{font-size:1rem;margin-bottom:10px;}
+.calendar{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-top:10px;}
+.day{aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:10px;font-size:0.8rem;background:#edf2f7;cursor:pointer;transition:0.15s;position:relative;}
+.day.done{background:#b8d8e8;color:#1a4d6b;font-weight:600;}
+.day.over{background:#fce4e4;border:1.5px solid var(--danger);color:#a33;}
+.day.today{box-shadow:0 0 0 2px var(--accent);}
+.day.empty{background:transparent;cursor:default;}
+.modal{position:fixed;inset:0;background:rgba(30,50,70,0.45);display:flex;align-items:center;justify-content:center;z-index:999;padding:20px;}
+.modal.hidden{display:none;}
+.modal-box{background:#fff;border-radius:20px;padding:22px;width:100%;max-width:360px;max-height:85vh;overflow-y:auto;}
+.field{margin-bottom:12px;}
+.field label{display:block;font-size:0.8rem;color:var(--muted);margin-bottom:5px;}
+.row{display:flex;gap:10px;align-items:center;}
+.row .btn{flex:1;}
+.item-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #eef2f6;font-size:0.9rem;}
+.item-row:last-child{border-bottom:none;}
+.emoji-btn{background:none;border:none;font-size:1.2rem;cursor:pointer;padding:2px 4px;}
+.emoji-btn.active{background:#dceefb;border-radius:20px;}
+.hidden{display:none!important;}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#2c3e50;color:#fff;padding:10px 22px;border-radius:24px;font-size:0.85rem;z-index:2000;opacity:0;transition:0.3s;pointer-events:none;}
+.toast.show{opacity:1;}
+canvas{max-height:220px;}
+.tabs{display:flex;gap:8px;margin-top:12px;}
+.tab{flex:1;padding:10px;text-align:center;border-radius:12px;background:#e8f0f7;color:var(--primary);font-size:0.85rem;cursor:pointer;font-weight:500;}
+.tab.active{background:var(--primary);color:#fff;}
+</style>
+</head>
+<body>
+
+<div id="authModal" class="modal">
+  <div class="modal-box">
+    <h3>🏠 进入大厅</h3>
+    <div class="field"><label>昵称（唯一）</label><input id="authNickname" placeholder="输入昵称" maxlength="20" autocomplete="off"></div>
+    <div class="field"><label>密码</label><input id="authPassword" type="password" placeholder="至少6位" autocomplete="off"></div>
+    <div class="row" style="margin-top:16px;">
+      <button class="btn btn-outline" id="loginBtn">登录</button>
+      <button class="btn" id="registerBtn">注册</button>
+    </div>
+    <p style="font-size:0.72rem;color:var(--muted);margin-top:14px;text-align:center;">数据仅存本机浏览器，换设备不互通</p>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <div class="card" style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;">
+    <strong id="displayName"></strong>
+    <button class="btn btn-sm btn-outline" onclick="logout()">切换身份</button>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <h2>📅 打卡</h2>
+      <button class="btn btn-sm" onclick="showCreateCheckin()">+ 新建</button>
+    </div>
+    <div id="checkinList"></div>
+    <p id="checkinEmpty" style="color:var(--muted);font-size:0.85rem;text-align:center;padding:20px 0;">还没有打卡项</p>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <h2>💰 账本</h2>
+      <button class="btn btn-sm btn-outline" onclick="showLimitSetting()">红线设置</button>
+    </div>
+    <p style="font-size:0.8rem;color:var(--muted);margin-bottom:8px;">每日红线：<strong id="limitDisplay">未设置</strong></p>
+    <div id="ledgerCalendar" class="calendar"></div>
+    <div style="margin-top:16px;"><canvas id="trendChart"></canvas></div>
+    <div class="tabs">
+      <div class="tab active" data-period="week" onclick="switchPeriod('week')">周趋势</div>
+      <div class="tab" data-period="month" onclick="switchPeriod('month')">月趋势</div>
+    </div>
+  </div>
+</div>
+
+<div id="modal" class="modal hidden"><div class="modal-box" id="modalContent"></div></div>
+<div id="toast" class="toast"></div>
+
+<script>
+// ==================== 本地存储层 ====================
+const DB_KEY = 'lobby_app_data_v1';
+const CHANNEL = 'lobby_channel_v1';
+const channel = new BroadcastChannel(CHANNEL);
+
+function readDB() {
+  try { return JSON.parse(localStorage.getItem(DB_KEY)) || {}; }
+  catch { return {}; }
+}
+function writeDB(data, broadcast = true) {
+  localStorage.setItem(DB_KEY, JSON.stringify(data));
+  if (broadcast) channel.postMessage({ type: 'update' });
+}
+
+// 密码简单哈希（仅防君子，纯前端无法真正安全）
+function hashPwd(pwd) {
+  let h = 0;
+  for (let i = 0; i < pwd.length; i++) { h = ((h << 5) - h) + pwd.charCodeAt(i); h |= 0; }
+  return 'h' + Math.abs(h).toString(16);
+}
+
+// ==================== 全局状态 ====================
+let currentNickname = '';
+let ledgerChart = null, trendChart = null, currentPeriod = 'week';
+let currentItemId = null;
+
+// ==================== 工具 ====================
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._timer); t._timer = setTimeout(() => t.classList.remove('show'), 2000);
+}
+function todayStr() { return new Date().toISOString().slice(0, 10); }
+function fmtDate(d) { return d.toISOString().slice(0, 10); }
+function getMonthDays(y, m) { return new Date(y, m + 1, 0).getDate(); }
+
+// ==================== 认证 ====================
+document.getElementById('registerBtn').onclick = () => {
+  const nick = document.getElementById('authNickname').value.trim();
+  const pwd = document.getElementById('authPassword').value;
+  if (!nick) return toast('请输入昵称');
+  if (pwd.length < 6) return toast('密码至少6位');
+  if (!/^[\u4e00-\u9fa5a-zA-Z0-9_]+$/.test(nick)) return toast('昵称仅限中英文数字下划线');
+  const db = readDB();
+  db.users = db.users || {};
+  if (db.users[nick]) return toast('昵称已被占用');
+  db.users[nick] = { pwd: hashPwd(pwd), createdAt: Date.now() };
+  db.checkins = db.checkins || {}; db.checkins[nick] = db.checkins[nick] || {};
+  db.ledger = db.ledger || {}; db.ledger[nick] = db.ledger[nick] || { records: {}, dailyLimit: null };
+  writeDB(db);
+  loginAs(nick);
+};
+
+document.getElementById('loginBtn').onclick = () => {
+  const nick = document.getElementById('authNickname').value.trim();
+  const pwd = document.getElementById('authPassword').value;
+  if (!nick || !pwd) return toast('请输入昵称和密码');
+  const db = readDB();
+  const u = db.users?.[nick];
+  if (!u) return toast('用户不存在，请先注册');
+  if (u.pwd !== hashPwd(pwd)) return toast('密码错误');
+  loginAs(nick);
+};
+
+function loginAs(nick) {
+  currentNickname = nick;
+  localStorage.setItem('lobby_current_user', nick);
+  document.getElementById('authModal').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('displayName').textContent = nick;
+  toast('欢迎，' + nick);
+  loadAll();
+}
+
+function logout() {
+  currentNickname = '';
+  localStorage.removeItem('lobby_current_user');
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('authModal').classList.remove('hidden');
+  document.getElementById('authNickname').value = '';
+  document.getElementById('authPassword').value = '';
+}
+
+// 自动登录
+const saved = localStorage.getItem('lobby_current_user');
+if (saved && readDB().users?.[saved]) loginAs(saved);
+
+// ==================== 弹窗 ====================
+function showModal(html) {
+  document.getElementById('modalContent').innerHTML = html;
+  document.getElementById('modal').classList.remove('hidden');
+}
+function closeModal() { document.getElementById('modal').classList.add('hidden'); }
+document.getElementById('modal').onclick = e => { if (e.target.id === 'modal') closeModal(); };
+
+// ==================== 打卡 ====================
+function showCreateCheckin() {
+  showModal(`
+    <h3>新建打卡项</h3>
+    <div class="field"><label>名称</label><input id="newCheckinName" placeholder="如：晨跑" maxlength="20"></div>
+    <div class="row" style="margin-top:16px;">
+      <button class="btn btn-outline" onclick="closeModal()">取消</button>
+      <button class="btn" onclick="createCheckin()">创建</button>
+    </div>
+  `);
+}
+
+function createCheckin() {
+  const name = document.getElementById('newCheckinName').value.trim();
+  if (!name) return toast('请输入名称');
+  const db = readDB();
+  const id = Date.now().toString(36);
+  db.checkins[currentNickname] = db.checkins[currentNickname] || {};
+  db.checkins[currentNickname][id] = { name, records: {}, createdAt: Date.now() };
+  writeDB(db); closeModal(); toast('已创建'); loadAll();
+}
+
+function deleteCheckin(id) {
+  if (!confirm('确定删除此打卡项？')) return;
+  const db = readDB();
+  delete db.checkins[currentNickname][id];
+  writeDB(db); toast('已删除'); loadAll();
+}
+
+function renderCheckinList(items) {
+  const container = document.getElementById('checkinList');
+  const empty = document.getElementById('checkinEmpty');
+  const keys = Object.keys(items || {});
+  if (keys.length === 0) { container.innerHTML = ''; empty.classList.remove('hidden'); return; }
+  empty.classList.add('hidden');
+  container.innerHTML = '';
+  keys.forEach(id => {
+    const item = items[id];
+    const div = document.createElement('div');
+    div.style.marginBottom = '16px';
+    div.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <strong style="cursor:pointer;" onclick="openCheckinDetail('${id}','${item.name}')">${item.name} ›</strong>
+      <button class="btn btn-sm btn-danger" onclick="deleteCheckin('${id}')" style="padding:4px 10px;font-size:0.7rem;">删除</button>
+    </div>`;
+    container.appendChild(div);
+  });
+}
+
+function openCheckinDetail(itemId, itemName) {
+  currentItemId = itemId;
+  const db = readDB();
+  const records = db.checkins[currentNickname]?.[itemId]?.records || {};
+  const now = new Date();
+  const year = now.getFullYear(), month = now.getMonth();
+  const days = getMonthDays(year, month);
+  const firstDay = new Date(year, month, 1).getDay();
+
+  let calHtml = '<div class="calendar">';
+  for (let i = 0; i < firstDay; i++) calHtml += '<div class="day empty"></div>';
+  for (let d = 1; d <= days; d++) {
+    const ds = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    let cls = 'day';
+    if (records[ds]) cls += ' done';
+    if (ds === todayStr()) cls += ' today';
+    calHtml += `<div class="${cls}" onclick="checkinDayClick('${ds}','${itemId}')">${d}</div>`;
+  }
+  calHtml += '</div>';
+
+  showModal(`
+    <h3>${itemName}</h3>
+    <p style="font-size:0.8rem;color:var(--muted);margin-bottom:8px;">仅当天可打卡，缺卡不可补</p>
+    ${calHtml}
+    <div id="checkinDayDetail" style="margin-top:14px;"></div>
+    <div class="row" style="margin-top:14px;"><button class="btn btn-outline" onclick="closeModal()">关闭</button></div>
+  `);
+}
+
+function checkinDayClick(dateStr, itemId) {
+  const db = readDB();
+  const rec = db.checkins[currentNickname]?.[itemId]?.records?.[dateStr];
+  const detail = document.getElementById('checkinDayDetail');
+  if (rec) {
+    const reactions = rec.reactions || {};
+    const emojis = ['👍', '🔥', '💪', '😊'];
+    let reactHtml = '';
+    emojis.forEach(e => {
+      const users = reactions[e] || [];
+      const active = users.includes(currentNickname);
+      reactHtml += `<button class="emoji-btn ${active ? 'active' : ''}" onclick="toggleReaction('${itemId}','${dateStr}','${e}')">${e} ${users.length || ''}</button>`;
+    });
+    detail.innerHTML = `
+      <div class="item-row"><span>⏱ 耗时</span><strong>${rec.duration} h</strong></div>
+      ${rec.note ? `<div class="item-row"><span>📝 备注</span><span>${rec.note}</span></div>` : ''}
+      ${rec.photo ? `<div style="margin:8px 0;"><img src="${rec.photo}" style="max-width:100%;border-radius:12px;"></div>` : ''}
+      <div style="margin-top:8px;">${reactHtml}</div>
+    `;
+  } else if (dateStr === todayStr()) {
+    detail.innerHTML = `
+      <div class="field"><label>耗时（小时）</label><input id="checkinDuration" type="number" step="0.1" min="0.1" placeholder="如 0.5"></div>
+      <div class="field"><label>备注（可选）</label><input id="checkinNote" placeholder="今天做了什么"></div>
+      <div class="field"><label>图片凭证（可选）</label><input id="checkinPhoto" type="file" accept="image/*"></div>
+      <button class="btn" style="width:100%;margin-top:6px;" onclick="doCheckin('${itemId}','${dateStr}')">确认打卡</button>
+    `;
+  } else {
+    detail.innerHTML = '<p style="color:var(--muted);font-size:0.85rem;">该日无记录（缺卡不可补）</p>';
+  }
+}
+
+function doCheckin(itemId, dateStr) {
+  const dur = parseFloat(document.getElementById('checkinDuration').value);
+  if (!dur || dur <= 0) return toast('请输入有效耗时');
+  const note = document.getElementById('checkinNote').value.trim();
+  const fileInput = document.getElementById('checkinPhoto');
+  const finish = (photoDataUrl) => {
+    const db = readDB();
+    db.checkins[currentNickname][itemId].records[dateStr] = {
+      duration: dur, note, photo: photoDataUrl || '', reactions: {}, timestamp: Date.now()
+    };
+    writeDB(db); toast('打卡成功'); closeModal(); loadAll();
+  };
+  if (fileInput.files.length > 0) {
+    const reader = new FileReader();
+    reader.onload = e => finish(e.target.result);
+    reader.readAsDataURL(fileInput.files[0]);
+  } else finish('');
+}
+
+function toggleReaction(itemId, dateStr, emoji) {
+  const db = readDB();
+  const rec = db.checkins[currentNickname][itemId].records[dateStr];
+  rec.reactions = rec.reactions || {};
+  rec.reactions[emoji] = rec.reactions[emoji] || [];
+  const idx = rec.reactions[emoji].indexOf(currentNickname);
+  if (idx >= 0) rec.reactions[emoji].splice(idx, 1);
+  else rec.reactions[emoji].push(currentNickname);
+  writeDB(db); checkinDayClick(dateStr, itemId); loadAll();
+}
+
+// ==================== 账本 ====================
+function renderLedgerCalendar(records, limit) {
+  const cal = document.getElementById('ledgerCalendar');
+  cal.innerHTML = '';
+  const now = new Date();
+  const year = now.getFullYear(), month = now.getMonth();
+  const days = getMonthDays(year, month);
+  const firstDay = new Date(year, month, 1).getDay();
+  for (let i = 0; i < firstDay; i++) cal.innerHTML += '<div class="day empty"></div>';
+  for (let d = 1; d <= days; d++) {
+    const ds = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const total = records?.[ds]?.total || 0;
+    let cls = 'day';
+    if (total > 0) cls += ' done';
+    if (limit && total > limit) cls += ' over';
+    if (ds === todayStr()) cls += ' today';
+    cal.innerHTML += `<div class="${cls}" onclick="openLedgerDay('${ds}')">${d}</div>`;
+  }
+}
+
+function openLedgerDay(dateStr) {
+  const db = readDB();
+  const data = db.ledger[currentNickname]?.records?.[dateStr] || { items: [], total: 0 };
+  const items = data.items || [];
+  let listHtml = items.map((it, i) => `
+    <div class="item-row"><span>${it.name}</span>
+    <span>¥${it.amount} <button class="btn btn-sm btn-danger" style="padding:2px 8px;font-size:0.7rem;margin-left:6px;" onclick="removeLedgerItem('${dateStr}',${i})">×</button></span></div>`).join('') || '<p style="color:var(--muted);font-size:0.85rem;">暂无记录</p>';
+
+  showModal(`
+    <h3>📅 ${dateStr}</h3>
+    <div>${listHtml}</div>
+    <p style="text-align:right;margin:8px 0;font-weight:600;">合计 ¥${data.total || 0}</p>
+    <hr style="border:none;border-top:1px solid #eef2f6;margin:10px 0;">
+    <div class="field"><label>项目名</label><input id="ledgerItemName" placeholder="如：午饭"></div>
+    <div class="field"><label>金额（元）</label><input id="ledgerItemAmount" type="number" step="0.01" min="0.01" placeholder="15"></div>
+    <button class="btn" style="width:100%;" onclick="addLedgerItem('${dateStr}')">添加</button>
+    <div class="row" style="margin-top:14px;"><button class="btn btn-outline" onclick="closeModal()">关闭</button></div>
+    <div style="margin-top:14px;"><canvas id="dayPieChart"></canvas></div>
+  `);
+
+  if (items.length > 0) {
+    const ctx = document.getElementById('dayPieChart');
+    if (ledgerChart) ledgerChart.destroy();
+    ledgerChart = new Chart(ctx, {
+      type: 'pie',
+      data: { labels: items.map(i => i.name), datasets: [{ data: items.map(i => i.amount),
+        backgroundColor: ['#4a7c9b', '#6ba3c7', '#8fb8d4', '#b8d8e8', '#d4e6f1', '#a8c8e0'] }] },
+      options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+    });
+  }
+}
+
+function addLedgerItem(dateStr) {
+  const name = document.getElementById('ledgerItemName').value.trim();
+  const amount = parseFloat(document.getElementById('ledgerItemAmount').value);
+  if (!name || !amount || amount <= 0) return toast('请填写项目名和有效金额');
+  const db = readDB();
+  const rec = db.ledger[currentNickname].records[dateStr] || { items: [], total: 0 };
+  rec.items = rec.items || [];
+  rec.items.push({ name, amount });
+  rec.total = rec.items.reduce((s, i) => s + i.amount, 0);
+  db.ledger[currentNickname].records[dateStr] = rec;
+  writeDB(db); toast('已记录'); closeModal(); openLedgerDay(dateStr); loadAll();
+}
+
+function removeLedgerItem(dateStr, idx) {
+  const db = readDB();
+  const rec = db.ledger[currentNickname].records[dateStr];
+  rec.items.splice(idx, 1);
+  rec.total = rec.items.reduce((s, i) => s + i.amount, 0);
+  writeDB(db); closeModal(); openLedgerDay(dateStr); loadAll();
+}
+
+function showLimitSetting() {
+  const db = readDB();
+  const cur = db.ledger[currentNickname]?.dailyLimit || '';
+  showModal(`
+    <h3>每日红线</h3>
+    <div class="field"><label>金额（元），留空取消</label><input id="limitInput" type="number" min="0" value="${cur}"></div>
+    <div class="row" style="margin-top:14px;">
+      <button class="btn btn-outline" onclick="closeModal()">取消</button>
+      <button class="btn" onclick="saveLimit()">保存</button>
+    </div>
+  `);
+}
+
+function saveLimit() {
+  const val = parseFloat(document.getElementById('limitInput').value);
+  const db = readDB();
+  db.ledger[currentNickname].dailyLimit = val > 0 ? val : null;
+  writeDB(db); closeModal(); toast('已保存'); loadAll();
+}
+
+// ==================== 趋势图 ====================
+function switchPeriod(p) {
+  currentPeriod = p;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.period === p));
+  renderTrend();
+}
+
+function renderTrend() {
+  const db = readDB();
+  const records = db.ledger[currentNickname]?.records || {};
+  const now = new Date();
+  let labels = [], data = [];
+  if (currentPeriod === 'week') {
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now); d.setDate(d.getDate() - i);
+      labels.push(`${d.getMonth() + 1}/${d.getDate()}`);
+      data.push(records[fmtDate(d)]?.total || 0);
+    }
+  } else {
+    const year = now.getFullYear(), month = now.getMonth();
+    const days = getMonthDays(year, month);
+    for (let d = 1; d <= days; d++) {
+      const ds = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      labels.push(d);
+      data.push(records[ds]?.total || 0);
+    }
+  }
+  const ctx = document.getElementById('trendChart');
+  if (trendChart) trendChart.destroy();
+  trendChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [{ label: '日开销 (¥)', data, borderColor: '#4a7c9b',
+      backgroundColor: 'rgba(74,124,155,0.1)', fill: true, tension: 0.3, pointRadius: 3 }] },
+    options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+  });
+}
+
+// ==================== 加载 ====================
+function loadAll() {
+  const db = readDB();
+  renderCheckinList(db.checkins?.[currentNickname] || {});
+  const ledger = db.ledger?.[currentNickname] || { records: {}, dailyLimit: null };
+  document.getElementById('limitDisplay').textContent = ledger.dailyLimit ? `¥${ledger.dailyLimit}` : '未设置';
+  renderLedgerCalendar(ledger.records, ledger.dailyLimit);
+  renderTrend();
+}
+
+// 跨标签页实时同步
+channel.onmessage = () => {
+  if (currentNickname) loadAll();
+};
+</script>
+</body>
+</html>
